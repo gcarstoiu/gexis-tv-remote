@@ -166,6 +166,10 @@ class Remote:
         self.me, self.send, self.call = me, send, call
         self.active = False
         self.playing = None
+        #: Keys pressed that this plugin does not use, each said once: what
+        #: a remote sends shows in the log (a Back key that did nothing,
+        #: 2026-10-31).
+        self.unused: set[int] = set()
 
     def _to(self, dest: int, *data: int) -> None:
         own, _ = self.me()
@@ -224,6 +228,9 @@ class Remote:
             self.transport(TRANSPORT[code])
         elif code == PAUSE_PLAY:
             self.transport("pause" if self.playing is not False else "play")
+        elif code not in self.unused:
+            self.unused.add(code)
+            log(f"key 0x{code:02x} pressed; this plugin does not use it")
 
     def transport(self, command: str) -> None:
         if not command:
@@ -246,19 +253,29 @@ def call(path: str, body: dict | None) -> None:
 
 # ---- the plugin ------------------------------------------------------------
 
-def speak_to_the_player() -> None:
-    """Say hello on the plugin socket and answer what asks for an answer."""
-    path = os.environ.get("GEXIS_PLUGIN_SOCKET", "/run/gexis/plugins.sock")
-    conn = socket.socket(socket.AF_UNIX)
-    conn.connect(path)
-    stream = conn.makefile("rw")
-    stream.write(json.dumps({"t": "hello", "contract": 1, "id": ID, "kind": "service", "name": NAME}) + "\n")
-    stream.flush()
-    for line in stream:
-        message = json.loads(line)
-        if message.get("id") is not None:
-            stream.write(json.dumps({"t": "ok", "id": message["id"], "result": True}) + "\n")
-            stream.flush()
+def speak_to_the_player(path: str | None = None, every: float = 5.0, rounds: int | None = None) -> None:
+    """Say hello on the plugin socket and answer what asks for an answer -
+    again each time the player's core starts: at boot its socket may not be
+    there yet (found 2026-10-31), and a restart closes it."""
+    path = path or os.environ.get("GEXIS_PLUGIN_SOCKET", "/run/gexis/plugins.sock")
+    while rounds is None or rounds > 0:
+        try:
+            with socket.socket(socket.AF_UNIX) as conn:
+                conn.connect(path)
+                stream = conn.makefile("rw")
+                stream.write(json.dumps({"t": "hello", "contract": 1, "id": ID, "kind": "service",
+                                         "name": NAME}) + "\n")
+                stream.flush()
+                for line in stream:
+                    message = json.loads(line)
+                    if message.get("id") is not None:
+                        stream.write(json.dumps({"t": "ok", "id": message["id"], "result": True}) + "\n")
+                        stream.flush()
+        except (OSError, ValueError):
+            pass
+        if rounds is not None:
+            rounds -= 1
+        time.sleep(every)
 
 
 #: Who must answer on the port: the TV, or a receiver (an audio system).

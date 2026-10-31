@@ -2,7 +2,7 @@
   "id": "tv-remote",
   "name": "TV remote (HDMI-CEC)",
   "kind": "service",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "run": "tv_remote.py",
   "summary": "The TV's own remote drives the player: arrows, OK and Back on its screen; play, pause and skip.",
   "permissions": ["cec"]

@@ -2,8 +2,10 @@
 """The plugin's answers on the bus and the remote's keys, with no TV: a fake
 bus and a fake player. Run: python3 -m pytest tests"""
 import ctypes
+import json
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tv-remote"))
 import tv_remote as tv  # noqa: E402
@@ -58,6 +60,14 @@ def test_the_remote_s_keys_reach_the_player():
         ("/transport/next", None), ("/transport/previous", None)]
 
 
+def test_a_key_it_does_not_use_is_said_once(capsys):
+    r, _, called = remote()
+    for _ in range(2):
+        r.handle(msg(TV, ME, 0x44, 0x91))
+    assert called == []
+    assert capsys.readouterr().out.count("key 0x91 pressed") == 1
+
+
 def test_one_play_pause_key_toggles():
     r, _, called = remote()
     for _ in range(3):
@@ -88,6 +98,27 @@ def test_its_own_messages_and_polls_are_ignored():
     r.handle(bytes([(ME << 4) | TV]))
     r.handle(msg(ME, TV, 0x8F))
     assert sent == [] and called == []
+
+
+def test_hello_again_once_the_player_s_socket_is_there(tmp_path):
+    """At boot the plugin can start before the player's socket exists."""
+    import socket
+    import threading
+    path = str(tmp_path / "plugins.sock")
+    heard = []
+
+    def player():
+        time.sleep(0.3)
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(path)
+            server.listen(1)
+            conn, _ = server.accept()
+            with conn:
+                heard.append(json.loads(conn.makefile().readline()))
+
+    threading.Thread(target=player, daemon=True).start()
+    tv.speak_to_the_player(path, every=0.1, rounds=10)
+    assert heard and heard[0]["t"] == "hello" and heard[0]["id"] == "tv-remote"
 
 
 class FakeBus:
